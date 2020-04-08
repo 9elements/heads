@@ -25,3 +25,6 @@ clean
 *.fv
 *.bin
 *.bad
+
+blobs/**/*.bin
+blobs/**/*.rom

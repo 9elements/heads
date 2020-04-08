@@ -1,0 +1,647 @@
+From abc9747801745f34c31bfb16c31fd848a544c0b3 Mon Sep 17 00:00:00 2001
+From: Jonas Moehle <ad-min@mailbox.org>
+Date: Wed, 25 Dec 2019 03:40:51 +0100
+Subject: [PATCH] mb/lenovo/*: Add support for VBOOT on 12MiB devices
+
+Enable VBOOT support on all devices that have a 12 MiB flash, using
+RW_MAIN_A + RW_MAIN_B partition, allowing the use of tianocore payload
+in both RW_MAIN_A, RW_MAIN_B and WP_RO.
+
+* Add VBNV section to cmos.layout
+* Add FMAP for VBOOT
+* Select Kconfigs for VBOOT
+* Enable VBOOT_SLOTS_RW_AB by default
+
+The VBNV is intentionally not covered by the CMOS checksum.
+
+Tested on x230 and T440p.
+
+Change-Id: I8a35a06ece1e9d57a2ef23970e61ae26fafce543
+Signed-off-by: Patrick Rudolph <patrick.rudolph@9elements.com>
+Signed-off-by: Jonas Moehle <ad-min@mailbox.org>
+Reviewed-on: https://review.coreboot.org/c/coreboot/+/32617
+Tested-by: build bot (Jenkins) <no-reply@coreboot.org>
+Reviewed-by: Peter Lemenkov <lemenkov@gmail.com>
+Reviewed-by:  Felix Singer <felixsinger@posteo.net>
+---
+ src/mainboard/lenovo/t430/Kconfig             | 19 +++++++++++
+ src/mainboard/lenovo/t430/cmos.layout         |  3 ++
+ src/mainboard/lenovo/t430/vboot-rwab.fmd      | 34 +++++++++++++++++++
+ src/mainboard/lenovo/t430s/Kconfig            | 19 +++++++++++
+ src/mainboard/lenovo/t430s/cmos.layout        |  3 ++
+ src/mainboard/lenovo/t430s/vboot-rwab.fmd     | 34 +++++++++++++++++++
+ src/mainboard/lenovo/t440p/Kconfig            | 19 +++++++++++
+ src/mainboard/lenovo/t440p/cmos.layout        |  3 ++
+ src/mainboard/lenovo/t440p/vboot-rwab.fmd     | 34 +++++++++++++++++++
+ src/mainboard/lenovo/t530/Kconfig             | 19 +++++++++++
+ src/mainboard/lenovo/t530/cmos.layout         |  3 ++
+ src/mainboard/lenovo/t530/vboot-rwab.fmd      | 34 +++++++++++++++++++
+ src/mainboard/lenovo/x131e/Kconfig            | 19 +++++++++++
+ src/mainboard/lenovo/x131e/cmos.layout        |  3 ++
+ src/mainboard/lenovo/x131e/vboot-rwab.fmd     | 34 +++++++++++++++++++
+ src/mainboard/lenovo/x1_carbon_gen1/Kconfig   | 19 +++++++++++
+ .../lenovo/x1_carbon_gen1/cmos.layout         |  3 ++
+ .../lenovo/x1_carbon_gen1/vboot-rwab.fmd      | 34 +++++++++++++++++++
+ src/mainboard/lenovo/x230/Kconfig             | 19 +++++++++++
+ src/mainboard/lenovo/x230/cmos.layout         |  3 ++
+ src/mainboard/lenovo/x230/vboot-rwab.fmd      | 34 +++++++++++++++++++
+ 21 files changed, 392 insertions(+)
+ create mode 100644 src/mainboard/lenovo/t430/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/t430s/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/t440p/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/t530/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/x131e/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/x1_carbon_gen1/vboot-rwab.fmd
+ create mode 100644 src/mainboard/lenovo/x230/vboot-rwab.fmd
+
+diff --git a/src/mainboard/lenovo/t430/Kconfig b/src/mainboard/lenovo/t430/Kconfig
+index 7137b5eb73..6695913ac7 100644
+--- a/src/mainboard/lenovo/t430/Kconfig
++++ b/src/mainboard/lenovo/t430/Kconfig
+@@ -26,6 +26,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	select INTEL_GMA_HAVE_VBT
+ 	select MAINBOARD_USES_IFD_GBE_REGION
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/t430
+diff --git a/src/mainboard/lenovo/t430/cmos.layout b/src/mainboard/lenovo/t430/cmos.layout
+index 1b50e7fa74..f9757f0794 100644
+--- a/src/mainboard/lenovo/t430/cmos.layout
++++ b/src/mainboard/lenovo/t430/cmos.layout
+@@ -80,6 +80,9 @@ entries
+ #437        3        r       0        unused
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896          32      r       0        mrc_scrambler_seed
+ 928          32      r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/t430/vboot-rwab.fmd b/src/mainboard/lenovo/t430/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/t430/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/t430s/Kconfig b/src/mainboard/lenovo/t430s/Kconfig
+index 0c7d0756ba..0810fa9442 100644
+--- a/src/mainboard/lenovo/t430s/Kconfig
++++ b/src/mainboard/lenovo/t430s/Kconfig
+@@ -27,6 +27,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	# Workaround for EC/KBC IRQ1.
+ 	select SERIRQ_CONTINUOUS_MODE
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/t430s
+diff --git a/src/mainboard/lenovo/t430s/cmos.layout b/src/mainboard/lenovo/t430s/cmos.layout
+index 97d97ed349..891a29414c 100644
+--- a/src/mainboard/lenovo/t430s/cmos.layout
++++ b/src/mainboard/lenovo/t430s/cmos.layout
+@@ -80,6 +80,9 @@ entries
+ #436         4       r       0        unused
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896          32      r       0        mrc_scrambler_seed
+ 928          32      r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/t430s/vboot-rwab.fmd b/src/mainboard/lenovo/t430s/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/t430s/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/t440p/Kconfig b/src/mainboard/lenovo/t440p/Kconfig
+index bf821f3d0c..2671b4865b 100644
+--- a/src/mainboard/lenovo/t440p/Kconfig
++++ b/src/mainboard/lenovo/t440p/Kconfig
+@@ -23,6 +23,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	select SYSTEM_TYPE_LAPTOP
+ 	select MAINBOARD_USES_IFD_GBE_REGION
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/t440p
+diff --git a/src/mainboard/lenovo/t440p/cmos.layout b/src/mainboard/lenovo/t440p/cmos.layout
+index 8c5fb0b14b..8ab00e03e2 100644
+--- a/src/mainboard/lenovo/t440p/cmos.layout
++++ b/src/mainboard/lenovo/t440p/cmos.layout
+@@ -73,6 +73,9 @@ entries
+ #437        3        r       0        unused
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # coreboot config options: check sums
+ 984          16      h       0        check_sum
+ 
+diff --git a/src/mainboard/lenovo/t440p/vboot-rwab.fmd b/src/mainboard/lenovo/t440p/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/t440p/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/t530/Kconfig b/src/mainboard/lenovo/t530/Kconfig
+index f63a12054f..cfeb12b9d2 100644
+--- a/src/mainboard/lenovo/t530/Kconfig
++++ b/src/mainboard/lenovo/t530/Kconfig
+@@ -28,6 +28,25 @@ config BOARD_LENOVO_BASEBOARD_T530
+ 
+ if BOARD_LENOVO_BASEBOARD_T530
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config VARIANT_DIR
+ 	string
+ 	default "t530" if BOARD_LENOVO_T530
+diff --git a/src/mainboard/lenovo/t530/cmos.layout b/src/mainboard/lenovo/t530/cmos.layout
+index 3400a4d4c7..0c8c546e11 100644
+--- a/src/mainboard/lenovo/t530/cmos.layout
++++ b/src/mainboard/lenovo/t530/cmos.layout
+@@ -81,6 +81,9 @@ entries
+ 
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896         32        r       0        mrc_scrambler_seed
+ 928         32        r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/t530/vboot-rwab.fmd b/src/mainboard/lenovo/t530/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/t530/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/x131e/Kconfig b/src/mainboard/lenovo/x131e/Kconfig
+index e7da8d0d77..3c0a222c95 100644
+--- a/src/mainboard/lenovo/x131e/Kconfig
++++ b/src/mainboard/lenovo/x131e/Kconfig
+@@ -21,6 +21,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	select SERIRQ_CONTINUOUS_MODE
+ 	select INTEL_GMA_HAVE_VBT
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/x131e
+diff --git a/src/mainboard/lenovo/x131e/cmos.layout b/src/mainboard/lenovo/x131e/cmos.layout
+index 93c74fbdcc..41b8354dd3 100644
+--- a/src/mainboard/lenovo/x131e/cmos.layout
++++ b/src/mainboard/lenovo/x131e/cmos.layout
+@@ -79,6 +79,9 @@ entries
+ 
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896         32        r       0        mrc_scrambler_seed
+ 928         32        r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/x131e/vboot-rwab.fmd b/src/mainboard/lenovo/x131e/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/x131e/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/x1_carbon_gen1/Kconfig b/src/mainboard/lenovo/x1_carbon_gen1/Kconfig
+index a15cadf202..b4a2256db3 100644
+--- a/src/mainboard/lenovo/x1_carbon_gen1/Kconfig
++++ b/src/mainboard/lenovo/x1_carbon_gen1/Kconfig
+@@ -26,6 +26,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	# Workaround for EC/KBC IRQ1.
+ 	select SERIRQ_CONTINUOUS_MODE
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/x1_carbon_gen1
+diff --git a/src/mainboard/lenovo/x1_carbon_gen1/cmos.layout b/src/mainboard/lenovo/x1_carbon_gen1/cmos.layout
+index bb252610c1..55a8a58962 100644
+--- a/src/mainboard/lenovo/x1_carbon_gen1/cmos.layout
++++ b/src/mainboard/lenovo/x1_carbon_gen1/cmos.layout
+@@ -80,6 +80,9 @@ entries
+ 
+ 440          8       h       0        volume
+ 
++# VBOOT
++448         128      r        0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896         32        r       0        mrc_scrambler_seed
+ 928         32        r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/x1_carbon_gen1/vboot-rwab.fmd b/src/mainboard/lenovo/x1_carbon_gen1/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/x1_carbon_gen1/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+diff --git a/src/mainboard/lenovo/x230/Kconfig b/src/mainboard/lenovo/x230/Kconfig
+index a043efcd70..849556ab47 100644
+--- a/src/mainboard/lenovo/x230/Kconfig
++++ b/src/mainboard/lenovo/x230/Kconfig
+@@ -27,6 +27,25 @@ config BOARD_SPECIFIC_OPTIONS
+ 	# Workaround for EC/KBC IRQ1.
+ 	select SERIRQ_CONTINUOUS_MODE
+ 
++config VBOOT
++	select VBOOT_VBNV_CMOS
++	select GBB_FLAG_DISABLE_LID_SHUTDOWN
++	select GBB_FLAG_DISABLE_PD_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_EC_SOFTWARE_SYNC
++	select GBB_FLAG_DISABLE_FWMP
++	select HAS_RECOVERY_MRC_CACHE
++
++config VBOOT_SLOTS_RW_AB
++	default y
++
++config VBOOT_VBNV_OFFSET
++	hex
++	default 0x2a
++
++config FMDFILE
++	string
++	default "src/mainboard/$(CONFIG_MAINBOARD_DIR)/vboot-rwab.fmd" if VBOOT
++
+ config MAINBOARD_DIR
+ 	string
+ 	default lenovo/x230
+diff --git a/src/mainboard/lenovo/x230/cmos.layout b/src/mainboard/lenovo/x230/cmos.layout
+index 27197fb4b8..99034009a4 100644
+--- a/src/mainboard/lenovo/x230/cmos.layout
++++ b/src/mainboard/lenovo/x230/cmos.layout
+@@ -80,6 +80,9 @@ entries
+ 
+ 440          8       h       0        volume
+ 
++# VBOOT
++448          128     r       0        vbnv
++
+ # SandyBridge MRC Scrambler Seed values
+ 896         32        r       0        mrc_scrambler_seed
+ 928         32        r       0        mrc_scrambler_seed_s3
+diff --git a/src/mainboard/lenovo/x230/vboot-rwab.fmd b/src/mainboard/lenovo/x230/vboot-rwab.fmd
+new file mode 100644
+index 0000000000..1747c0e708
+--- /dev/null
++++ b/src/mainboard/lenovo/x230/vboot-rwab.fmd
+@@ -0,0 +1,34 @@
++FLASH@0xff400000 0xc00000 {
++	SI_ALL@0x0 0x500000 {
++		SI_DESC@0x0 0x1000
++		SI_GBE@0x1000 0x2000
++		SI_ME
++	}
++	SI_BIOS@0x500000 0x700000 {
++		RW_SECTION_A 0x280000 {
++			VBLOCK_A 0x10000
++			FW_MAIN_A(CBFS)
++			RW_FWID_A 0x40
++		}
++		RW_SECTION_B 0x280000 {
++			VBLOCK_B 0x10000
++			FW_MAIN_B(CBFS)
++			RW_FWID_B 0x40
++		}
++		UNIFIED_MRC_CACHE@0x500000 0x20000 {
++			RECOVERY_MRC_CACHE@0x0 0x10000
++			RW_MRC_CACHE@0x10000 0x10000
++		}
++		RW_VPD(PRESERVE) 0x1000
++		SMMSTORE(PRESERVE)@0x521000 0x40000
++
++		WP_RO {
++			FMAP 0x800
++			RO_FRID 0x40
++			RO_PADDING 0x7c0
++			RO_VPD(PRESERVE) 0x1000
++			GBB 0x1e000
++			COREBOOT(CBFS)
++		}
++	}
++}
+-- 
+2.21.1
+
