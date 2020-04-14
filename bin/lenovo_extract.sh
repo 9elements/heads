@@ -63,8 +63,9 @@ if [ -z "$BOARD" ]; then
   exit 1;
 fi
 
+# verify target board prefix
 for supported in "${SUPPORTED[@]}"; do
-  [ "$BOARD" == "$supported" ] && _FOUND="y" && break
+  [[ $BOARD == ${supported}* ]] && _FOUND="y" && BOARD="$supported" && break
 done
 
 if [ -z "$_FOUND" ]; then
