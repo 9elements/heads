@@ -30,7 +30,7 @@ coreboot_configure := \
 		CFLAGS_x86_64="$(EXTRA_FLAGS)" \
 
 COREBOOT_IASL="$(build)/$(coreboot_base_dir)/util/crossgcc/xgcc/bin/iasl"
-COREBOOT_TOOLCHAIN="$(build)/$(coreboot_base_dir)/util/crossgcc/xgcc/bin/i386-elf-gcc"
+COREBOOT_TOOLCHAIN="$(build)/$(coreboot_base_dir)/.xcompile"
 
 # coreboot is built with the 32-bit compiler; ideally we could use the same
 # x86_64-linux-musl -m32 to build it, but this causes some link errors that need
